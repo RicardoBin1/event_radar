@@ -1,0 +1,56 @@
+name: event-radar
+
+on:
+  schedule:
+    # 每 15 分钟一次。GitHub 在高峰期可能延迟 5-15 分钟，属正常。
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# 防止两次运行同时改 state.json 造成冲突
+concurrency:
+  group: event-radar
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run radar
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python main.py
+
+      - name: Persist state
+        if: always()
+        run: |
+          if [ ! -f data/state.json ]; then
+            echo "no state file, skip"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/state.json
+          if git diff --staged --quiet; then
+            echo "state unchanged"
+            exit 0
+          fi
+          git commit -m "chore: update radar state [skip ci]"
+          git pull --rebase --autostash origin ${GITHUB_REF_NAME} || true
+          git push || echo "push failed, will retry next run"
