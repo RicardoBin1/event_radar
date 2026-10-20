@@ -34,6 +34,8 @@ jobs:
 
       - name: Run radar
         env:
+          PUSH_CHANNEL: feishu
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python main.py
 

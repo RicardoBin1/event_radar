@@ -46,8 +46,11 @@ git push -u origin main
 
 仓库 → Settings → Secrets and variables → Actions → New repository secret
 
-- Name: `PUSHPLUS_TOKEN`
-- Value: PushPlus 的 token（pushplus.plus 微信扫码登录后获取）
+- Name: `FEISHU_WEBHOOK`
+- Value: 飞书群机器人 webhook 地址
+
+获取方式：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook。
+安全设置选「自定义关键词」，关键词填 `事件雷达`（所有消息都以此为前缀）。
 
 ### 2.3 启用 Actions
 
@@ -182,12 +185,12 @@ cd E:\Code\event_radar
 # 联网抓取，但不推送
 .venv\Scripts\python.exe main.py --dry-run
 
-# 正常跑一次（需要 PUSHPLUS_TOKEN 环境变量）
-set PUSHPLUS_TOKEN=你的token
+# 正常跑一次（需要 FEISHU_WEBHOOK 环境变量）
+set FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/你的地址
 .venv\Scripts\python.exe main.py
 ```
 
-`--dry-run` 下会打印每条 P0 的标题，但不消耗 PushPlus 额度。
+`--dry-run` 下会打印每条 P0 的标题，但不真正发消息。
 
 ---
 
@@ -206,7 +209,7 @@ set PUSHPLUS_TOKEN=你的token
 | 现象 | 先看这里 |
 |---|---|
 | 没收到推送 | Actions 日志里 `命中 P0 0 条`？那就是真没事件；有命中但没推 → 检查 Secret |
-| `未配置 PUSHPLUS_TOKEN` | Secret 名字拼错，或没在 workflow 里传 env |
+| `未配置 FEISHU_WEBHOOK` | Secret 名字拼错，或没在 workflow 里传 env |
 | 巨潮 0 条 | 正常，夜间/非交易时段公告少；用 `--dry-run` 看窗口时间对不对 |
 | 重复推送 | `Persist state` 步骤失败了，去 Actions 看 git push 是否被拒 |
 | 推送太吵 | 把 P0 规则里噪音大的词挪到 P1，或加进 `NOISE_KEYWORDS` |

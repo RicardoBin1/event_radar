@@ -5,6 +5,13 @@ import os
 # ---------------------------------------------------------------------------
 # 推送
 # ---------------------------------------------------------------------------
+PUSH_CHANNEL = os.getenv("PUSH_CHANNEL", "feishu")   # feishu / pushplus
+
+# 飞书自定义机器人 webhook
+# 群设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook 地址
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+
+# PushPlus 作为备选通道
 PUSHPLUS_TOKEN = os.getenv("PUSHPLUS_TOKEN", "")
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
 

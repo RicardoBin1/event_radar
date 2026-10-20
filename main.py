@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
 import re
@@ -288,9 +287,37 @@ def fetch_cls(session: requests.Session, since_ts: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def push(title: str, content: str, dry_run: bool = False) -> bool:
+    """按 PUSH_CHANNEL 分发。content 是纯文本，两个通道都能吃。"""
     if dry_run:
         log(f"[DRY-RUN] {title}")
         return True
+    if C.PUSH_CHANNEL == "pushplus":
+        return _push_pushplus(title, content)
+    return _push_feishu(title, content)
+
+
+def _push_feishu(title: str, content: str) -> bool:
+    if not C.FEISHU_WEBHOOK:
+        log("未配置 FEISHU_WEBHOOK，跳过推送")
+        return False
+    try:
+        resp = requests.post(
+            C.FEISHU_WEBHOOK,
+            json={"msg_type": "text", "content": {"text": content}},
+            timeout=C.REQUEST_TIMEOUT,
+        )
+        data = resp.json()
+        # v2 接口返回 {"code":0,"msg":"success"}，老接口返回 {"StatusCode":0}
+        code = data.get("code", data.get("StatusCode"))
+        if code == 0:
+            return True
+        log(f"飞书返回异常：{data}")
+    except Exception as exc:
+        log(f"飞书推送失败：{exc}")
+    return False
+
+
+def _push_pushplus(title: str, content: str) -> bool:
     if not C.PUSHPLUS_TOKEN:
         log("未配置 PUSHPLUS_TOKEN，跳过推送")
         return False
@@ -301,7 +328,7 @@ def push(title: str, content: str, dry_run: bool = False) -> bool:
                 "token": C.PUSHPLUS_TOKEN,
                 "title": title[:100],
                 "content": content,
-                "template": "html",
+                "template": "txt",
             },
             timeout=C.REQUEST_TIMEOUT,
         )
@@ -310,47 +337,41 @@ def push(title: str, content: str, dry_run: bool = False) -> bool:
             return True
         log(f"PushPlus 返回异常：{data}")
     except Exception as exc:
-        log(f"推送失败：{exc}")
+        log(f"PushPlus 推送失败：{exc}")
     return False
 
 
-def p0_html(rec: dict) -> str:
-    label = f"[P0·{rec['tag']}]"
+def p0_text(rec: dict) -> str:
     stock = rec.get("name") or rec.get("code") or "全市场"
-    code = f"（{rec['code']}）" if rec.get("code") else ""
+    code = f"({rec['code']})" if rec.get("code") else ""
     src = "巨潮公告" if rec["source"] == "cninfo" else "财联社"
-    link = f'<p><a href="{html.escape(rec["url"])}">查看原文</a></p>' if rec.get("url") else ""
-    return (
-        f"<h3>{html.escape(label)} {html.escape(stock)}{code}</h3>"
-        f"<p>{html.escape(rec['title'])}</p>"
-        f"<p style='color:#888'>{src} · {fmt_ts(rec['ts'])}</p>"
-        f"{link}"
-    )
+    lines = [
+        f"【事件雷达】[P0·{rec['tag']}] {stock}{code}",
+        rec["title"],
+        f"{src} · {fmt_ts(rec['ts'])}",
+    ]
+    if rec.get("url"):
+        lines.append(rec["url"])
+    return "\n".join(lines)
 
 
-def p1_html(items: list[dict], title: str) -> str:
+def p1_text(items: list[dict], title: str) -> str:
     grouped: dict[str, list[dict]] = {}
     for it in items:
         grouped.setdefault(it["tag"], []).append(it)
 
-    parts = [f"<h3>{html.escape(title)}（{len(items)} 条）</h3>"]
+    lines = [f"【事件雷达】{title}（{len(items)} 条）", "─" * 18]
     for tag, rows in grouped.items():
-        parts.append(f"<h4>{html.escape(tag)}（{len(rows)}）</h4><ul>")
-        for r in rows[:15]:
+        lines.append(f"【{tag}】{len(rows)} 条")
+        for i, r in enumerate(rows[:15], 1):
             stock = r.get("name") or r.get("code") or ""
             head = f"{stock} " if stock else ""
+            lines.append(f"{i}. {head}{r['title']}")
             if r.get("url"):
-                parts.append(
-                    f'<li>{html.escape(head)}<a href="{html.escape(r["url"])}">'
-                    f'{html.escape(r["title"])}</a> '
-                    f'<span style="color:#888">{fmt_ts(r["ts"])}</span></li>'
-                )
-            else:
-                parts.append(f"<li>{html.escape(head)}{html.escape(r['title'])}</li>")
+                lines.append(f"   {r['url']}")
         if len(rows) > 15:
-            parts.append(f"<li>…… 另有 {len(rows) - 15} 条</li>")
-        parts.append("</ul>")
-    return "".join(parts)
+            lines.append(f"…… 另有 {len(rows) - 15} 条，见仓库 state.json")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +390,7 @@ def run(dry_run: bool = False, offline: bool = False, force_flush: bool = False)
 
     # 昨日超限结转的 P1，开盘前补发
     if state.get("carry"):
-        ok = push("事件雷达·昨日累积汇总", p1_html(state["carry"], "昨日累积"), dry_run)
+        ok = push("事件雷达·昨日累积汇总", p1_text(state["carry"], "昨日累积"), dry_run)
         log(f"补发昨日累积 {len(state['carry'])} 条 {'成功' if ok else '失败'}")
         if ok or dry_run:
             state["carry"] = []
@@ -420,11 +441,11 @@ def run(dry_run: bool = False, offline: bool = False, force_flush: bool = False)
     # P0 逐条推
     for rec in p0:
         if dry_run:
-            push(f"[P0·{rec['tag']}] {rec.get('name') or rec.get('code')}", p0_html(rec), True)
+            push(f"[P0·{rec['tag']}] {rec.get('name') or rec.get('code')}", p0_text(rec), True)
             continue
         ok = push(
             f"[P0·{rec['tag']}] {rec.get('name') or rec.get('code') or '全市场'}",
-            p0_html(rec),
+            p0_text(rec),
         )
         if ok:
             state["daily_count"] += 1
@@ -447,7 +468,7 @@ def run(dry_run: bool = False, offline: bool = False, force_flush: bool = False)
             items = state["p1_buffer"]
             ok = push(
                 f"事件雷达·{len(items)} 条汇总",
-                p1_html(items, f"{now:%H:%M} 事件汇总"),
+                p1_text(items, f"{now:%H:%M} 事件汇总"),
                 dry_run,
             )
             log(f"P1 合并推送 {len(items)} 条 {'成功' if ok else '失败'}")
